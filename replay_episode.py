@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """
+This was greatly aided by Gemini
+
 Replay Episode Script for ROS/Panda
 Loads a LeRobot dataset (local or Hub) and replays the actions on the robot.
 
@@ -22,7 +24,6 @@ import threading
 import torch
 from pathlib import Path
 
-# ROS2 Imports
 from sensor_msgs.msg import JointState, CompressedImage
 from geometry_msgs.msg import Pose, PoseStamped
 from std_msgs.msg import Bool
@@ -31,7 +32,6 @@ from moveit_msgs.srv import GetPositionIK
 from moveit_msgs.msg import MoveItErrorCodes
 from tf_transformations import euler_from_quaternion, quaternion_from_euler
 
-# LeRobot Imports
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 class ReplayEpisodeNode(Node):

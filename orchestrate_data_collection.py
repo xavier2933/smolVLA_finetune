@@ -10,7 +10,6 @@ import time
 import shutil
 from pathlib import Path
 
-# ROS2/Math Imports
 from sensor_msgs.msg import JointState, CompressedImage
 from geometry_msgs.msg import Pose, PoseStamped
 from std_msgs.msg import Bool
@@ -21,7 +20,6 @@ from cv_bridge import CvBridge
 from tf_transformations import euler_from_quaternion, quaternion_multiply, quaternion_from_euler
 import tf2_ros
 
-# LeRobot Imports
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.video_utils import VideoEncodingManager
 import random
@@ -128,7 +126,7 @@ class SmolVLAOrchestrator(Node):
     def refresh_tf(self):
         """Re-initializes TF buffer to handle simulation time resets."""
         self.get_logger().info("🔄 Refreshing TF Buffer...")
-        # Manually unregister old listener if possible (Python API is limited here, relying on GC)
+
         if hasattr(self, 'tf_listener'):
             del self.tf_listener
         if hasattr(self, 'tf_buffer'):
@@ -138,10 +136,8 @@ class SmolVLAOrchestrator(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         
-        # Wait a moment for buffer to fill
         time.sleep(1.0)
 
-    # --- RECORDING CALLBACKS ---
     def master_shutter_callback(self, msg):
         now = time.time()
         if not self.is_recording or (now - self.last_frame_time) < self.target_dt:
@@ -166,40 +162,36 @@ class SmolVLAOrchestrator(Node):
         with self.data_lock:
             if not self.is_recording:
                 return
+            
             # Ensure we have all necessary data before proceeding
             if not self.new_side_image or any(v is None for v in [self.latest_eef_pose, self.latest_target_pose, self.latest_joints]):
                 return
             
-            # Snap data
             snap_top, snap_side = self.latest_image_top, self.latest_image_side
             snap_eef, snap_target = self.latest_eef_pose, self.latest_target_pose
             snap_joints, snap_gripper = self.latest_joints, self.latest_gripper_cmd
             self.new_side_image = False
 
         try:
-            # 1. Process Images: Resize to 256x256 as per config.json
             img_top = cv2.resize(self.bridge.compressed_imgmsg_to_cv2(snap_top, "rgb8"), (256, 256)).transpose(2, 0, 1)
             img_side = cv2.resize(self.bridge.compressed_imgmsg_to_cv2(snap_side, "rgb8"), (256, 256)).transpose(2, 0, 1)
 
-            # 2. Logic for Rotation and Gripper
             gripper_val = 1.0 if snap_gripper else -1.0  # -1 = Closed, 1 = Open
             
-            # Current End-Effector RPY
             c_rpy = euler_from_quaternion([snap_eef.orientation.x, snap_eef.orientation.y, 
                                         snap_eef.orientation.z, snap_eef.orientation.w])
             
-            # 3. State Vector: 8-DOF (XYZ, RPY, Finger1, Finger2)
+            # State Vector: 8-DOF (XYZ, RPY, Finger1, Finger2)
             state_vec = np.array([
                 snap_eef.position.x, snap_eef.position.y, snap_eef.position.z,
                 c_rpy[0], c_rpy[1], c_rpy[2], 
                 gripper_val, -gripper_val
             ], dtype=np.float32)
 
-            # 🌟 4. Compute Action as DELTA BETWEEN CONSECUTIVE STATES
             if not hasattr(self, 'prev_eef_pose') or self.prev_eef_pose is None:
                 # First frame: zero action (no previous state)
                 action_vec = np.zeros(7, dtype=np.float32)
-                action_vec[6] = gripper_val  # Include gripper state
+                action_vec[6] = gripper_val
                 self.get_logger().info("First frame: using zero action")
             else:
                 # Compute delta from previous to current state
@@ -210,7 +202,6 @@ class SmolVLAOrchestrator(Node):
                     self.prev_eef_pose.orientation.w
                 ])
                 
-                # Position delta
                 dx = snap_eef.position.x - self.prev_eef_pose.position.x
                 dy = snap_eef.position.y - self.prev_eef_pose.position.y
                 dz = snap_eef.position.z - self.prev_eef_pose.position.z
@@ -227,16 +218,14 @@ class SmolVLAOrchestrator(Node):
                     gripper_val
                 ], dtype=np.float32)
                 
-                # Log action magnitude for debugging
                 pos_mag = np.linalg.norm([dx, dy, dz])
-                if pos_mag > 0.05:  # More than 5cm in one step at 10Hz
+                if pos_mag > 0.05:
                     self.get_logger().warn(f"Large action delta: {pos_mag:.4f}m - possible issue!")
 
             # Store current pose for next iteration
             import copy
             self.prev_eef_pose = copy.deepcopy(snap_eef)
 
-            # 5. Save to LeRobot Dataset
             self.dataset.add_frame({
                 "observation.images.image": img_top.astype(np.uint8),
                 "observation.images.image2": img_side.astype(np.uint8),
@@ -250,7 +239,6 @@ class SmolVLAOrchestrator(Node):
             import traceback
             traceback.print_exc()
 
-    # --- ROBOT CONTROL LOGIC ---
     def reset_environment(self):
         self.get_logger().info(f"🔄 Resetting Environment (Episode {self.current_episode + 1}/{self.total_episodes})")
         self.pub_aut.publish(Bool(data=False))
@@ -272,12 +260,6 @@ class SmolVLAOrchestrator(Node):
         req.ik_request.ik_link_name = self.ee_link
         req.ik_request.avoid_collisions = True
     
-        # 🌟 CRITICAL: Seed with current joints to prevent elbow flipping
-        # if self.latest_joints is not None:
-        #     req.ik_request.robot_state.joint_state.name = self.joint_names
-        #     req.ik_request.robot_state.joint_state.position = self.latest_joints.tolist()
-        
-        # Create an event to block this thread without spinning ROS
         event = threading.Event()
         result_wrapper = {"res": None}
 
@@ -337,11 +319,9 @@ class SmolVLAOrchestrator(Node):
 
                 motion_success = True
                 try:
-                    # --- Your Execution Sequence ---
-                    self.refresh_tf() # 🌟 Clear TF buffer to accept timestamps from T=0 (post-reset)
+                    self.refresh_tf()
                     self.control_gripper(True)
 
-                    # Simple lookup - the buffer is fresh, so whatever we find is new
                     tf = self.tf_buffer.lookup_transform(self.base_frame, self.target_frame, rclpy.time.Time())
                     q_block = [tf.transform.rotation.x, tf.transform.rotation.y, tf.transform.rotation.z, tf.transform.rotation.w]
                     q_block = [tf.transform.rotation.x, tf.transform.rotation.y, tf.transform.rotation.z, tf.transform.rotation.w]
@@ -357,7 +337,6 @@ class SmolVLAOrchestrator(Node):
                     self.get_logger().error(f"❌ Motion error: {e}")
                     motion_success = False
 
-                # Stop Recording
                 with self.data_lock:
                     self.is_recording = False
 
@@ -397,7 +376,6 @@ def main():
 
     node = SmolVLAOrchestrator(repo_id=args.repo, fps=10, root_dir=None, total_episodes=args.episodes)
     
-    # Run loop in a separate thread so ROS callbacks stay alive
     thread = threading.Thread(target=node.run_collection, daemon=True)
     thread.start()
 

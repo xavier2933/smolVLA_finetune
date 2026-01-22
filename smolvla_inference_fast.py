@@ -35,7 +35,6 @@ class SmolVLAFastInference(Node):
         self.device = device
         self.task_instruction = task_instruction
         
-        # Load Policy
         self.get_logger().info(f"🤖 Loading SmolVLA from {checkpoint_path}")
         
         # Handle subfolder for checkpoint weights
@@ -134,7 +133,7 @@ class SmolVLAFastInference(Node):
                 self.latest_joints = np.array(msg.position[:7], dtype=np.float32)
 
     def run_inference_loop(self):
-        """Run as fast as possible, capped at 10Hz"""
+        """Run as fast as possible, capped at 10Hz (collection speed)"""
         min_dt = 0.1  # 10Hz max
         
         while rclpy.ok():
@@ -162,8 +161,6 @@ class SmolVLAFastInference(Node):
                     action = action_dict.get("action", action_dict) if isinstance(action_dict, dict) else action_dict
                 inference_time = time.time() - t0
                 
-                # Execute immediately - trajectory duration = time until next action
-                # Use min_dt (0.1s) as the trajectory duration
                 self.execute_action(action, snap_eef, snap_joints, duration=min_dt)
                 
                 self.get_logger().info(f"Inference: {inference_time:.3f}s")
@@ -197,7 +194,6 @@ class SmolVLAFastInference(Node):
     def execute_action(self, action, current_eef_pose, current_joints, duration=0.1):
         action = action.cpu().numpy().squeeze()
         
-        # Denormalize if stats provided
         if self.action_stats is not None:
             action = action * self.action_stats['std'] + self.action_stats['mean']
         
